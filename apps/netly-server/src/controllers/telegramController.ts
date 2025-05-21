@@ -404,6 +404,111 @@ export const addBotToChannel = async(req: Request, res: Response) => {
     }
 }
 
+type ChannelEntity = {
+    id?: string | number;
+    username?: string;
+    participantsCount?: number;
+    about?: string;
+    date?: number;
+    className?: string;
+    broadcast?: boolean;
+    creator?: boolean;
+    adminRights?: { [key: string]: any };
+};
+
+export const listTelegramChannels = async(req: Request, res: Response) => {
+    const userId = req.userId;
+    
+    // Get user data with session
+    const user = await prismaClient.user.findUnique({
+        where: {
+            id: userId
+        }
+    });
+    
+    if(!user || !user.session || user.authenticated !== true) {
+        res.status(400).json({
+            error: "Please verify your Telegram account first"
+        });
+        return;
+    }
+    
+    // Create client with saved session
+    const stringSession = new StringSession(user.session);
+    const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRetries: 5 });
+    await client.connect();
+    
+    try {
+        // Check if user is logged in
+        if(!await client.isUserAuthorized()) {
+            res.status(401).json({
+                error: "User not authorized on Telegram"
+            });
+            return;
+        }
+        
+        console.log("Fetching all channels from Telegram...");
+        
+        // Get all dialogs (chats, channels, groups)
+        const dialogs = await client.getDialogs({});
+        
+        // Filter to only include channels where user is owner or admin
+        const channels = dialogs.filter(dialog => {
+            const entity = dialog.entity as unknown as ChannelEntity;
+            return entity &&
+                entity.className === 'Channel' &&
+                (entity.creator || !!entity.adminRights);
+        });
+        
+        console.log(`Found ${channels.length} channels in user's Telegram account where user is owner or admin`);
+        
+        // Get channels from database to check which ones have the bot
+        const dbChannels = await prismaClient.channel.findMany({
+            where: {
+                ownerId: userId
+            }
+        });
+        
+        // Create a map of database channels by telegramId for quick lookup
+        const dbChannelMap = new Map();
+        dbChannels.forEach(channel => {
+            dbChannelMap.set(channel.telegramId, channel);
+        });
+        
+        // Format the channels with additional info
+        const formattedChannels = channels.map(dialog => {
+            const entity = (dialog.entity || {}) as ChannelEntity;
+            const telegramId = entity.id ? entity.id.toString() : undefined;
+            const dbChannel = dbChannelMap.get(telegramId);
+        
+            return {
+                telegramId: telegramId,
+                title: dialog.title,
+                username: entity.username ? `@${entity.username}` : null,
+                isPublic: !!entity.username,
+                memberCount: entity.participantsCount || 0,
+                hasBot: dbChannel ? dbChannel.hasBot : false,
+                botUsername: dbChannel ? dbChannel.botUsername : null,
+                isOwner: !!entity.creator,
+                description: entity.about || "",
+                createdAt: entity.date ? new Date(entity.date * 1000) : null,
+                id: dbChannel ? dbChannel.id : null
+            };
+        });
+        
+        res.status(200).json({
+            message: "Channels fetched successfully from Telegram",
+            channels: formattedChannels,
+            total: formattedChannels.length
+        });
+    } catch (error: any) {
+        console.log("Error fetching channels:", error);
+        res.status(500).json({
+            error: "Failed to fetch channels: " + (error.message || "Unknown error")
+        });
+    }
+}
+
 export const listChannels = async(req: Request, res: Response) => {
     const userId = req.userId;
     

@@ -9,6 +9,7 @@ telegramRouter.post('/createChannel', authenticate, telegramController.createTel
 telegramRouter.post('/addBot', authenticate, telegramController.addBotToChannel);
 telegramRouter.post('/addUser', authenticate, telegramController.addUserToChannel);
 telegramRouter.post('/listChannels', authenticate, telegramController.listChannels);
+telegramRouter.post('/listTelegramChannels', authenticate, telegramController.listTelegramChannels);
 telegramRouter.post('/removeUser', authenticate, telegramController.removeUserFromChannel);
 
 //via telegram bot
